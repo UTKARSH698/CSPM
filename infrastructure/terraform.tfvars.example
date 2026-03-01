@@ -1,0 +1,7 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is git-ignored — never commit real values.
+
+aws_region    = "us-east-1"
+alert_email   = "your@email.com"
+dry_run       = true          # set to false once you're confident in auto-remediation
+scan_schedule = "rate(1 hour)"
