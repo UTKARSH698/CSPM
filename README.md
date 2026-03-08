@@ -1,97 +1,143 @@
-# CSPM — Cloud Security Posture Management
+<div align="center">
 
-An automated, serverless security scanner for AWS that continuously audits cloud infrastructure against the **CIS AWS Foundations Benchmark v1.5**, alerts on misconfigurations, and auto-remediates critical findings — all within the AWS Free Tier.
+# 🔐 CSPM — Cloud Security Posture Management
+
+### Automated AWS security scanning, alerting, and auto-remediation — serverless, event-driven, zero cost.
+
+![Python](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python&logoColor=white)
+![AWS Lambda](https://img.shields.io/badge/AWS_Lambda-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white)
+![Terraform](https://img.shields.io/badge/Terraform-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
+![CIS Benchmark](https://img.shields.io/badge/CIS_AWS_Benchmark-v1.5-green?style=for-the-badge)
+
+</div>
 
 ---
 
 ## The Problem
 
-Cloud misconfigurations are the #1 cause of cloud data breaches. An S3 bucket left public, an SSH port open to the world, a root account without MFA — these are not complex attacks. They are simple mistakes that automated tooling should catch and fix.
+Cloud misconfigurations are the **#1 cause of cloud data breaches** — not complex attacks, just simple mistakes.
 
-CSPM does exactly that.
+An S3 bucket accidentally left public. SSH open to the entire internet. A root account with no MFA. These are the findings that make headlines. CSPM catches them automatically, alerts you immediately, and fixes the safe ones without human intervention.
+
+---
+
+## Live Demo
+
+> First scan on a brand new AWS account — detected and alerted within seconds.
+
+```
+CSPM scan started | region=us-east-1
+
+Scan complete | total=25  passed=20  score=80.0%
+
+[CRITICAL] IAM-001 - Root account does not have MFA enabled
+[CRITICAL] CT-001  - No CloudTrail trail exists in this region
+[CRITICAL] SG-22   - Security group allows unrestricted SSH access (port 22)
+
+SNS alert sent | critical_count=3
+Remediator invoked asynchronously
+Findings saved → s3://cspm-findings-638630171818/findings/2026-03-08T09-18-09Z.json
+Metric published → CloudWatch: ComplianceScore = 80.0
+```
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    AWS Cloud                                │
-│                                                             │
-│   EventBridge (hourly)                                      │
-│         │                                                   │
-│         ▼                                                   │
-│   ┌─────────────┐    reads     ┌──────────────────────┐    │
-│   │   Scanner   │─────────────▶│  S3 / IAM / EC2 /    │    │
-│   │   Lambda    │              │  CloudTrail APIs      │    │
-│   └──────┬──────┘              └──────────────────────┘    │
-│          │                                                   │
-│    ┌─────┼──────────┬─────────────────┐                     │
-│    ▼     ▼          ▼                 ▼                     │
-│  ┌───┐ ┌────┐  ┌─────────┐   ┌────────────┐               │
-│  │ S3│ │ CW │  │   SNS   │   │ Remediator │               │
-│  │   │ │    │  │ (email) │   │   Lambda   │               │
-│  │findings│ │score│  │ alerts  │   │            │               │
-│  └───┘ └────┘  └─────────┘   └─────┬──────┘               │
-│                                     │                       │
-│                              auto-fix S3 + SGs              │
-│                              saves audit report to S3        │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                           AWS Cloud                                  │
+│                                                                      │
+│   ┌─────────────────┐                                                │
+│   │  EventBridge    │  runs every hour                               │
+│   └────────┬────────┘                                                │
+│            │                                                         │
+│            ▼                                                         │
+│   ┌─────────────────┐   scans    ┌─────────────────────────────┐    │
+│   │  Scanner Lambda │──────────▶ │  S3 · IAM · EC2 · CloudTrail│    │
+│   └────────┬────────┘            └─────────────────────────────┘    │
+│            │                                                         │
+│     ┌──────┼────────────┬────────────────────┐                      │
+│     ▼      ▼            ▼                    ▼                      │
+│  ┌──────┐ ┌──────────┐ ┌───────────┐  ┌───────────────┐            │
+│  │  S3  │ │CloudWatch│ │    SNS    │  │  Remediator   │            │
+│  │      │ │          │ │           │  │    Lambda     │            │
+│  │findings│ │  score  │ │ email alert│  │               │            │
+│  └──────┘ └──────────┘ └───────────┘  └──────┬────────┘            │
+│                                               │                      │
+│                                    auto-fix S3 public access         │
+│                                    auto-revoke open SG rules         │
+│                                    save audit report to S3           │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-**Flow**: EventBridge triggers the Scanner Lambda hourly → Scanner audits S3, IAM, Security Groups, and CloudTrail → Findings stored in S3 → Compliance score pushed to CloudWatch → Critical findings trigger SNS email alert → Scanner asynchronously invokes the Remediator Lambda → Remediator auto-fixes what it can, logs everything else.
+**Flow:** EventBridge triggers Scanner hourly → Scanner audits 4 AWS services → Findings saved to S3 → Score published to CloudWatch → Critical findings trigger SNS email → Scanner asynchronously invokes Remediator → Remediator auto-fixes safe issues and logs the rest.
 
 ---
 
-## Features
+## What It Checks
 
-### 19+ Security Checks (CIS AWS Foundations Benchmark v1.5)
+### 19+ Security Checks mapped to CIS AWS Foundations Benchmark v1.5
 
-| Service | Check | Severity | CIS Reference |
-|---|---|---|---|
-| S3 | Block Public Access not fully enabled | Critical | 2.1.5 |
-| S3 | Versioning disabled | Low | 2.1.3 |
-| S3 | Access logging disabled | Medium | 2.1.1 |
-| S3 | Default encryption disabled | Medium | 2.1.1 |
-| IAM | Root account MFA disabled | Critical | 1.5 |
-| IAM | Root account has active access keys | Critical | 1.4 |
-| IAM | Password policy below minimum requirements | Medium | 1.8–1.11 |
-| IAM | Access key older than 90 days | Medium | 1.14 |
-| EC2/SG | SSH (port 22) open to 0.0.0.0/0 | Critical | 5.2 |
-| EC2/SG | RDP (port 3389) open to 0.0.0.0/0 | Critical | 5.3 |
-| EC2/SG | Database ports open to internet | High | 5.x |
-| EC2/SG | All traffic allowed (protocol -1) | Critical | 5.x |
-| EC2/SG | Default security group has inbound rules | Medium | 5.4 |
-| CloudTrail | No trail exists | Critical | 3.1 |
-| CloudTrail | Trail is not multi-region | High | 3.1 |
-| CloudTrail | Log file validation disabled | Medium | 3.2 |
-| CloudTrail | Not integrated with CloudWatch Logs | Medium | 3.4 |
-| CloudTrail | Log bucket is publicly accessible | Critical | 3.3 |
-| CloudTrail | Logging currently paused | Critical | 3.1 |
+| Service | Check ID | Finding | Severity | CIS Ref |
+|---|---|---|---|---|
+| S3 | S3-001 | Block Public Access not fully enabled | 🔴 Critical | 2.1.5 |
+| S3 | S3-002 | Versioning disabled | 🟡 Low | 2.1.3 |
+| S3 | S3-003 | Access logging disabled | 🟠 Medium | 2.1.1 |
+| S3 | S3-004 | Default encryption disabled | 🟠 Medium | 2.1.1 |
+| IAM | IAM-001 | Root account MFA disabled | 🔴 Critical | 1.5 |
+| IAM | IAM-002 | Root account has active access keys | 🔴 Critical | 1.4 |
+| IAM | IAM-003 | Password policy below CIS minimum | 🟠 Medium | 1.8–1.11 |
+| IAM | IAM-004 | Access key older than 90 days | 🟠 Medium | 1.14 |
+| EC2/SG | SG-22 | SSH open to 0.0.0.0/0 | 🔴 Critical | 5.2 |
+| EC2/SG | SG-3389 | RDP open to 0.0.0.0/0 | 🔴 Critical | 5.3 |
+| EC2/SG | SG-3306/5432/27017/6379/9200 | Database ports exposed to internet | 🟥 High | 5.x |
+| EC2/SG | SG-ALL | All traffic allowed (protocol -1) | 🔴 Critical | 5.x |
+| EC2/SG | SG-DEFAULT | Default security group has inbound rules | 🟠 Medium | 5.4 |
+| CloudTrail | CT-001 | No trail exists | 🔴 Critical | 3.1 |
+| CloudTrail | CT-002 | Trail is not multi-region | 🟥 High | 3.1 |
+| CloudTrail | CT-003 | Log file validation disabled | 🟠 Medium | 3.2 |
+| CloudTrail | CT-004 | Not integrated with CloudWatch Logs | 🟠 Medium | 3.4 |
+| CloudTrail | CT-005 | Log bucket is publicly accessible | 🔴 Critical | 3.3 |
+| CloudTrail | CT-006 | Logging currently paused | 🔴 Critical | 3.1 |
 
-### Auto-Remediation
+---
 
-The Remediator Lambda auto-fixes findings that are safe to correct programmatically:
+## Auto-Remediation
 
-| Finding | Action Taken |
+The Remediator Lambda auto-fixes findings that are safe to correct programmatically. Everything else is flagged for human review.
+
+| Finding | Auto-Fix Applied |
 |---|---|
 | S3 public access enabled | Enables all 4 Block Public Access settings |
-| S3 versioning disabled | Enables versioning |
-| SSH/RDP open to internet | Revokes the specific inbound rule |
-| All-traffic SG rule | Revokes the open-world inbound rule |
-| IAM / CloudTrail findings | Logged for human review — not auto-fixed |
+| S3 versioning disabled | Enables versioning on the bucket |
+| SSH / RDP open to internet | Revokes the specific offending inbound rule |
+| All-traffic SG rule | Removes the open-world inbound rule |
+| IAM / CloudTrail issues | ⚠️ Logged for human review — too risky to auto-fix |
 
-A `DRY_RUN` mode lets you observe what would be fixed without making any changes. Every remediation action is written to an audit report in S3.
+> **DRY_RUN mode** — deploys with `DRY_RUN=true` by default. Logs every fix it *would* make without touching anything. Flip to `false` once you've reviewed the findings.
 
-### Compliance Score
+Every remediation action is written as a timestamped JSON audit report to S3.
 
-After each scan, a compliance score (0–100) is computed and pushed to CloudWatch as a custom metric:
+---
+
+## Compliance Score
+
+After each scan, a score is computed and pushed to CloudWatch as a custom metric:
 
 ```
 Score = (Passed Checks / Total Checks) × 100
 ```
 
-Track your score trend over time on the CloudWatch dashboard.
+Track your improvement over time using CloudWatch's metric graph.
+
+```
+Scan 1 (new account, no config):   66.7%   ██████████████████░░░░░░░░░░░
+Scan 2 (CloudTrail added):         68.0%   ██████████████████░░░░░░░░░░░
+Scan 3 (IAM + SG + CT fixed):     76.0%   ██████████████████████░░░░░░░
+Scan 4 (CW Logs linked):          80.0%   ████████████████████████░░░░░
+```
 
 ---
 
@@ -99,11 +145,11 @@ Track your score trend over time on the CloudWatch dashboard.
 
 | Layer | Technology |
 |---|---|
-| Runtime | Python 3.11 |
-| Cloud | AWS Lambda, EventBridge, S3, SNS, CloudWatch, IAM, EC2, CloudTrail |
+| Language | Python 3.11 |
+| Cloud Services | Lambda · EventBridge · S3 · SNS · CloudWatch · IAM · EC2 · CloudTrail |
 | IaC | Terraform |
 | CI/CD | GitHub Actions |
-| SDK | boto3 |
+| AWS SDK | boto3 |
 | Testing | pytest |
 | Linting | ruff |
 
@@ -114,32 +160,32 @@ Track your score trend over time on the CloudWatch dashboard.
 ```
 cspm/
 ├── scanner/
-│   ├── models.py               # Finding dataclass
-│   ├── scanner.py              # Scanner Lambda handler
+│   ├── models.py                  # Finding dataclass (check_id, severity, status, remediation)
+│   ├── scanner.py                 # Lambda handler — orchestrates all checks
 │   └── checks/
-│       ├── s3_checks.py        # 4 S3 checks
-│       ├── iam_checks.py       # 4 IAM checks
-│       ├── sg_checks.py        # 9+ Security Group checks
-│       └── cloudtrail_checks.py # 6 CloudTrail checks
+│       ├── s3_checks.py           # 4 checks: public access, versioning, logging, encryption
+│       ├── iam_checks.py          # 4 checks: root MFA, root keys, password policy, key age
+│       ├── sg_checks.py           # 9+ checks: SSH, RDP, DB ports, all-traffic, default SG
+│       └── cloudtrail_checks.py   # 6 checks: trail exists, multi-region, validation, CW Logs
 ├── remediator/
-│   ├── remediator.py           # Remediator Lambda handler + dispatcher
+│   ├── remediator.py              # Lambda handler + check_id dispatcher
 │   └── actions/
-│       ├── s3_actions.py       # S3 fix functions
-│       └── sg_actions.py       # Security Group fix functions
+│       ├── s3_actions.py          # block_public_access(), enable_versioning()
+│       └── sg_actions.py          # revoke_open_inbound_rules(), revoke_all_traffic_rule()
 ├── infrastructure/
-│   ├── main.tf                 # Provider + data sources
-│   ├── variables.tf            # Input variables
-│   ├── s3.tf                   # Findings bucket
-│   ├── sns.tf                  # Alert topic + email subscription
-│   ├── iam.tf                  # Least-privilege IAM roles
-│   ├── lambda.tf               # Lambda functions + zip packaging
-│   ├── eventbridge.tf          # Scheduled trigger
-│   ├── outputs.tf              # Useful post-deploy outputs
-│   └── terraform.tfvars.example
+│   ├── main.tf                    # Provider + AWS account data source
+│   ├── variables.tf               # aws_region, alert_email, dry_run, scan_schedule
+│   ├── s3.tf                      # Findings bucket (encrypted, versioned, 90-day lifecycle)
+│   ├── sns.tf                     # Alert topic + email subscription
+│   ├── iam.tf                     # Least-privilege roles for scanner + remediator
+│   ├── lambda.tf                  # Both Lambda functions + shared zip packaging
+│   ├── eventbridge.tf             # Hourly schedule + Lambda invoke permission
+│   ├── outputs.tf                 # Bucket name, function names, manual invoke command
+│   └── terraform.tfvars.example   # Safe template — copy to terraform.tfvars
 ├── tests/
-│   └── test_models.py
+│   └── test_models.py             # Unit tests for the Finding model
 ├── .github/workflows/
-│   └── pipeline.yml            # CI (lint+test) + CD (terraform deploy)
+│   └── pipeline.yml               # CI: lint + test on PR | CD: terraform deploy on main
 └── requirements.txt
 ```
 
@@ -148,76 +194,82 @@ cspm/
 ## Deploy
 
 ### Prerequisites
-
 - AWS account (Free Tier is sufficient)
 - [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.5
 - Python 3.11+
 - AWS CLI configured (`aws configure`)
 
-### Steps
+### One-time setup
 
 ```bash
-# 1. Clone the repo
+# 1. Clone
 git clone https://github.com/UTKARSH698/CSPM.git
 cd CSPM/infrastructure
 
-# 2. Copy and fill in your variables
+# 2. Set your variables
 cp terraform.tfvars.example terraform.tfvars
-# edit terraform.tfvars — set alert_email and aws_region
+# Edit terraform.tfvars — fill in alert_email and aws_region
 
-# 3. Deploy
+# 3. Deploy (18 AWS resources created automatically)
 terraform init
 terraform apply
 
 # 4. Confirm the SNS subscription email AWS sends you
 
-# 5. Trigger a manual scan to verify
-aws lambda invoke \
-  --function-name cspm-scanner \
-  --region us-east-1 \
-  /tmp/result.json && cat /tmp/result.json
+# 5. Run your first manual scan
+aws lambda invoke --function-name cspm-scanner --region us-east-1 result.json
+cat result.json
 ```
 
-### GitHub Actions CI/CD
+### CI/CD via GitHub Actions
 
 Every push to `main` automatically lints, tests, and deploys.
 
-Add these secrets to your repo (`Settings → Secrets → Actions`):
+Add these 4 secrets to your repo under `Settings → Secrets → Actions`:
 
-| Secret | Description |
+| Secret | Value |
 |---|---|
 | `AWS_ACCESS_KEY_ID` | IAM user access key |
 | `AWS_SECRET_ACCESS_KEY` | IAM user secret key |
-| `AWS_REGION` | e.g. `us-east-1` |
-| `ALERT_EMAIL` | Email to receive security alerts |
+| `AWS_REGION` | `us-east-1` |
+| `ALERT_EMAIL` | Email for security alerts |
 
 ---
 
 ## Design Decisions
 
-**DRY_RUN by default** — The remediator deploys with `DRY_RUN=true`. It logs every fix it would make without touching anything. Switch to `false` only after you've reviewed the findings and are confident in the automation.
+**DRY_RUN by default**
+The remediator deploys safe. It logs every fix it would make without applying anything. Switch to `false` only after reviewing your first few findings.
 
-**Async remediation** — The scanner invokes the remediator with `InvocationType=Event` (fire-and-forget). The scanner never blocks waiting for remediation, keeping scan latency low.
+**Async remediation**
+Scanner invokes the remediator with `InvocationType=Event` (fire-and-forget). Scanner latency stays under 6 seconds regardless of how many issues need fixing.
 
-**IAM/CloudTrail not auto-fixed** — Automatically rotating access keys or modifying trail configs carries too much risk of breaking production systems. These findings are flagged for human review.
+**IAM and CloudTrail not auto-fixed**
+Automatically rotating access keys or modifying trail configurations risks breaking production workloads. These are flagged for human review with clear remediation instructions.
 
-**IPv4 + IPv6 checked** — Security group checks cover both `0.0.0.0/0` and `::/0`. A common gap in similar tools.
+**IPv4 + IPv6 both checked**
+Security group checks cover `0.0.0.0/0` (IPv4) and `::/0` (IPv6). Most similar tools miss IPv6 entirely.
 
-**Port range awareness** — A rule allowing TCP `0–65535` still triggers the SSH check. Most tools only check for exact port matches.
+**Port range awareness**
+A rule allowing TCP `0–65535` still triggers the SSH check. Most tools only match exact port numbers — this one checks if the port falls within the rule's range.
 
-**Least-privilege IAM** — Scanner can only read. Remediator can only modify the specific resources it fixes. Neither has admin access.
+**Least-privilege IAM**
+Scanner role: read-only on S3, IAM, EC2, CloudTrail. Remediator role: only the specific write actions it needs. Neither role has admin access.
+
+**Single zip, two Lambdas**
+Both Lambda functions share one deployment package. Different handler paths point to the correct entry point. Simpler packaging, smaller attack surface.
 
 ---
 
 ## AWS Free Tier Usage
 
-| Service | Usage | Free Limit |
+| Service | How Used | Free Limit |
 |---|---|---|
-| Lambda | 2 invocations/hour | 1M req/month |
-| EventBridge | 1 event/hour | 1M events/month |
-| S3 | ~1 KB JSON per scan | 5 GB |
-| CloudWatch | 1 metric per scan | 3 dashboards, 10 metrics |
-| SNS | Email on critical findings | 1M publishes/month |
+| Lambda | 2 invocations/hour (scanner + remediator) | 1M req/month |
+| EventBridge | 1 scheduled event/hour | 1M events/month |
+| S3 | ~10 KB JSON per scan | 5 GB |
+| CloudWatch | 1 custom metric per scan | 10 metrics free |
+| SNS | Email on critical findings only | 1M publishes/month |
 
 **Estimated monthly cost: $0**
 
@@ -225,6 +277,6 @@ Add these secrets to your repo (`Settings → Secrets → Actions`):
 
 ## Author
 
-**Utkarsh** — B.Tech CSE (Cloud Technology & Information Security)
+**Utkarsh Batham** — B.Tech CSE · Cloud Technology & Information Security
 
-- GitHub: [@UTKARSH698](https://github.com/UTKARSH698)
+[![GitHub](https://img.shields.io/badge/GitHub-UTKARSH698-181717?style=flat&logo=github)](https://github.com/UTKARSH698)
