@@ -122,7 +122,7 @@ Every remediation action is written as a timestamped JSON audit report to S3.
 
 ---
 
-## Compliance Score
+## Compliance Score & Dashboard
 
 After each scan, a score is computed and pushed to CloudWatch as a custom metric:
 
@@ -130,23 +130,45 @@ After each scan, a score is computed and pushed to CloudWatch as a custom metric
 Score = (Passed Checks / Total Checks) × 100
 ```
 
-Track your improvement over time using CloudWatch's metric graph.
+A live **CloudWatch Dashboard** is deployed automatically — showing compliance score, 7-day trend, Lambda invocations, and error rates in one view.
 
 ```
-Scan 1 (new account, no config):   66.7%   ██████████████████░░░░░░░░░░░
-Scan 2 (CloudTrail added):         68.0%   ██████████████████░░░░░░░░░░░
-Scan 3 (IAM + SG + CT fixed):     76.0%   ██████████████████████░░░░░░░
-Scan 4 (CW Logs linked):          80.0%   ████████████████████████░░░░░
+┌─────────────────────────────────────────────────────────┐
+│  🔐 CSPM — Cloud Security Posture Management            │
+├──────────┬──────────────────────────────────────────────┤
+│          │                                              │
+│  80.0%   │  Compliance Score Trend ──────────────────   │
+│          │  ── 80% target line                          │
+├──────────┴──────────────────────────────────────────────┤
+│  Services scanned · checks performed · what to fix      │
+├──────────────────────────┬──────────────────────────────┤
+│  Lambda Invocations      │  Lambda Errors               │
+│  Scanner · Remediator    │  Scanner · Remediator        │
+└──────────────────────────┴──────────────────────────────┘
+```
+
+Score progression on this account (brand new → secured):
+
+```
+Scan 1 — new account, no config:   66.7%   ██████████████████░░░░░░░░░░░
+Scan 2 — CloudTrail created:       68.0%   ██████████████████░░░░░░░░░░░
+Scan 3 — IAM + SG + CT fixed:     76.0%   ██████████████████████░░░░░░░
+Scan 4 — CW Logs linked:          80.0%   ████████████████████████░░░░░
 ```
 
 ---
 
-## Tech Stack
+## Tech Stack & AWS Services
 
 | Layer | Technology |
 |---|---|
 | Language | Python 3.11 |
-| Cloud Services | Lambda · EventBridge · S3 · SNS · CloudWatch · IAM · EC2 · CloudTrail |
+| Compute | AWS Lambda (Scanner + Remediator) |
+| Scheduling | AWS EventBridge (hourly cron trigger) |
+| Storage | AWS S3 (findings JSON + audit reports) |
+| Alerting | AWS SNS (email on critical findings) |
+| Monitoring | AWS CloudWatch (custom metrics + dashboard) |
+| Security APIs | AWS IAM · EC2 · CloudTrail |
 | IaC | Terraform |
 | CI/CD | GitHub Actions |
 | AWS SDK | boto3 |
@@ -180,6 +202,7 @@ cspm/
 │   ├── iam.tf                     # Least-privilege roles for scanner + remediator
 │   ├── lambda.tf                  # Both Lambda functions + shared zip packaging
 │   ├── eventbridge.tf             # Hourly schedule + Lambda invoke permission
+│   ├── cloudwatch_dashboard.tf    # Live dashboard: score trend, invocations, errors
 │   ├── outputs.tf                 # Bucket name, function names, manual invoke command
 │   └── terraform.tfvars.example   # Safe template — copy to terraform.tfvars
 ├── tests/
@@ -210,7 +233,7 @@ cd CSPM/infrastructure
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars — fill in alert_email and aws_region
 
-# 3. Deploy (18 AWS resources created automatically)
+# 3. Deploy (19 AWS resources created automatically)
 terraform init
 terraform apply
 
@@ -219,6 +242,9 @@ terraform apply
 # 5. Run your first manual scan
 aws lambda invoke --function-name cspm-scanner --region us-east-1 result.json
 cat result.json
+
+# 6. View the live dashboard
+# AWS Console → CloudWatch → Dashboards → CSPM-Security-Posture
 ```
 
 ### CI/CD via GitHub Actions
