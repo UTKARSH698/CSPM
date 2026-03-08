@@ -132,20 +132,9 @@ Score = (Passed Checks / Total Checks) × 100
 
 A live **CloudWatch Dashboard** is deployed automatically — showing compliance score, 7-day trend, Lambda invocations, and error rates in one view.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  🔐 CSPM — Cloud Security Posture Management            │
-├──────────┬──────────────────────────────────────────────┤
-│          │                                              │
-│  80.0%   │  Compliance Score Trend ──────────────────   │
-│          │  ── 80% target line                          │
-├──────────┴──────────────────────────────────────────────┤
-│  Services scanned · checks performed · what to fix      │
-├──────────────────────────┬──────────────────────────────┤
-│  Lambda Invocations      │  Lambda Errors               │
-│  Scanner · Remediator    │  Scanner · Remediator        │
-└──────────────────────────┴──────────────────────────────┘
-```
+![Compliance Score](demo/dashboard-score.png)
+
+![Full Dashboard](demo/dashboard-full.png)
 
 Score progression on this account (brand new → secured):
 
