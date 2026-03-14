@@ -38,8 +38,6 @@ def _check_public_access(client, bucket: str, region: str) -> Finding:
             config.get("RestrictPublicBuckets", False),
         ])
         status = Status.PASS if all_blocked else Status.FAIL
-    except client.exceptions.NoSuchPublicAccessBlockConfiguration:
-        status = Status.FAIL
     except Exception:
         status = Status.FAIL
 
