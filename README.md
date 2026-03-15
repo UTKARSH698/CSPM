@@ -37,7 +37,7 @@ Scan complete | total=25  passed=20  score=80.0%
 
 SNS alert sent | critical_count=3
 Remediator invoked asynchronously
-Findings saved → s3://cspm-findings-638630171818/findings/2026-03-08T09-18-09Z.json
+Findings saved → s3://cspm-findings-<your-account-id>/findings/2026-03-08T09-18-09Z.json
 Metric published → CloudWatch: ComplianceScore = 80.0
 ```
 
