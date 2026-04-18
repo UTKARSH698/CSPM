@@ -10,6 +10,7 @@
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
 ![CIS Benchmark](https://img.shields.io/badge/CIS_AWS-v1.5-success?style=for-the-badge)
 ![Tests](https://img.shields.io/badge/Tests-64_passing-brightgreen?style=for-the-badge)
+![Serverless](https://img.shields.io/badge/Serverless-zero_ops-black?style=for-the-badge&logo=awslambda&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 
 </div>
@@ -27,7 +28,10 @@
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
 - [Deploy](#deploy)
+  - [Running Tests](#running-tests)
+  - [CI/CD via GitHub Actions](#cicd-via-github-actions)
 - [Design Decisions](#design-decisions)
+- [Known Limitations](#known-limitations)
 - [AWS Free Tier](#aws-free-tier)
 - [License](#license)
 - [Author](#author)
@@ -39,6 +43,10 @@
 Cloud misconfigurations are the **#1 cause of cloud data breaches** — not sophisticated attacks, just simple mistakes.
 
 An S3 bucket accidentally left public. SSH open to the entire internet. A root account with no MFA. These are the findings that make headlines. CSPM catches them automatically, alerts you the moment they appear, and fixes the safe ones without human intervention.
+
+Building this system surfaced a deeper problem: **security posture is not a point-in-time audit — it is a continuous formal verification problem.** The gap between a written security policy and a deployed system's actual state changes every time infrastructure mutates. Treating it as a snapshot (scan once, fix, done) is structurally wrong.
+
+This project frames posture management as a state-transition system where remediation actions must preserve global security invariants — not just fix individual findings in isolation. That framing exposed an open question I could not answer purely through engineering: see [Known Limitations](#known-limitations).
 
 ---
 
@@ -164,10 +172,10 @@ A **CloudWatch Dashboard** is deployed automatically — showing compliance scor
 Score progression on this account (brand new → progressively secured):
 
 ```
-Scan 1 — new account, no config:    66.7%   ████████████████████░░░░░░░░░░
-Scan 2 — CloudTrail created:        68.0%   ████████████████████░░░░░░░░░░
-Scan 3 — IAM + SG + CT fixed:      76.0%   ██████████████████████░░░░░░░░
-Scan 4 — CloudWatch Logs linked:    80.0%   ████████████████████████░░░░░░
+Scan 1 — new account, no config:   66.7%  ████████████████████░░░░░░░░░░
+Scan 2 — CloudTrail created:       68.0%  ████████████████████░░░░░░░░░░
+Scan 3 — IAM + SG + CT fixed:     76.0%  ██████████████████████░░░░░░░░
+Scan 4 — CloudWatch Logs linked:   80.0%  ████████████████████████░░░░░░
 ```
 
 ---
@@ -186,7 +194,7 @@ Scan 4 — CloudWatch Logs linked:    80.0%   ███████████�
 | IaC | Terraform |
 | CI/CD | GitHub Actions |
 | AWS SDK | boto3 |
-| Testing | pytest (64 tests) |
+| Testing | pytest (64 tests) · moto (AWS mocks) |
 | Linting | ruff |
 
 ---
@@ -270,6 +278,15 @@ cat result.json
 # AWS Console → CloudWatch → Dashboards → CSPM-Security-Posture
 ```
 
+### Running Tests
+
+No AWS credentials needed — all 64 tests use `moto` to mock AWS APIs locally.
+
+```bash
+pip install pytest pytest-cov boto3 "moto[s3,iam,ec2,cloudtrail]"
+pytest tests/ -v --cov=scanner --cov=remediator --cov-report=term-missing
+```
+
 ### CI/CD via GitHub Actions
 
 Every push to `main` automatically lints, tests, and deploys.
@@ -310,6 +327,28 @@ Both Lambda functions share one deployment package. Different handler paths poin
 
 ---
 
+## Known Limitations
+
+These are honest accounts of what the system does not yet handle — documented design boundaries, not overlooked bugs.
+
+| Limitation | Root Cause | What Would Be Needed |
+|---|---|---|
+| **Remediation completeness under concurrent misconfigurations** — applying fix A then fix B in dependency order is locally safe, but I cannot formally prove this strategy is complete under all possible concurrent misconfiguration states | The dependency-ordering heuristic was derived from engineering intuition, not from a formal model of remediation state space | A formal model of the cloud environment as a state-transition system, with proof that the dependency-ordering strategy preserves global security invariants in all reachable states — not just the cases I tested |
+| **Single-region only** — checks run in the configured region; resources in other regions are invisible to the scanner | EventBridge schedule and Lambda execute in one region; no cross-region aggregation | Multi-region aggregator Lambda collecting findings across all enabled regions before scoring |
+| **No drift detection between scans** — if a misconfiguration appears and is manually fixed within the same hourly window, CSPM never sees it | Point-in-time scanning; no continuous state comparison | EventBridge rule on CloudTrail API events for real-time drift detection between scheduled scans |
+| **Remediation is not idempotent across Lambda retries** — if the remediator Lambda retries after a partial fix, it may attempt to re-apply an already-applied action | No idempotency key or state check before each action | Pre-remediation state check: read current resource state before writing, skip if already compliant |
+| **No cross-account support** — scanner operates only within the account it is deployed in | IAM role is scoped to the deployment account | STS AssumeRole pattern with a central aggregator account and spoke roles in each target account |
+
+### The Open Formal Question
+
+The remediation safety problem — whether a sequence of individually correct fixes can produce a collectively insecure intermediate or final state — is the core unsolved question this project exposed.
+
+My current strategy (dependency-ordered fixes, single control boundary per cycle) prevents the cases I could construct. But I cannot prove it handles all cases. Specifically: under *k* simultaneous misconfigurations with interdependent remediation actions, does dependency ordering always produce a safe final state? Is there a bound on *k* beyond which the strategy fails?
+
+This is a formal methods question, not an engineering one. It motivates my interest in applying model checking and policy verification techniques to cloud infrastructure state.
+
+---
+
 ## AWS Free Tier
 
 | Service | How Used | Free Limit |
@@ -335,3 +374,4 @@ MIT © [Utkarsh Batham](https://github.com/UTKARSH698)
 **Utkarsh Batham** — B.Tech CSE · Cloud Technology & Information Security
 
 [![GitHub](https://img.shields.io/badge/GitHub-UTKARSH698-181717?style=flat&logo=github)](https://github.com/UTKARSH698)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-utkarshbatham-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://linkedin.com/in/utkarshbatham)
