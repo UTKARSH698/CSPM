@@ -2,8 +2,8 @@
 # Both Lambdas share the same zip — they use different handler paths.
 
 data "archive_file" "cspm" {
-  type        = "zip"
-  source_dir  = "${path.module}/.."
+  type       = "zip"
+  source_dir = "${path.module}/.."
   excludes = [
     "infrastructure",
     "dashboard",
@@ -20,12 +20,12 @@ data "archive_file" "cspm" {
 # ── Scanner Lambda ─────────────────────────────────────────────────────────────
 
 resource "aws_lambda_function" "scanner" {
-  function_name    = "cspm-scanner"
-  role             = aws_iam_role.scanner.arn
-  runtime          = "python3.11"
-  handler          = "scanner.scanner.lambda_handler"
-  timeout          = 300   # 5 minutes — scans can take time on large accounts
-  memory_size      = 256
+  function_name = "cspm-scanner"
+  role          = aws_iam_role.scanner.arn
+  runtime       = "python3.11"
+  handler       = "scanner.scanner.lambda_handler"
+  timeout       = 300 # 5 minutes — scans can take time on large accounts
+  memory_size   = 256
 
   filename         = data.archive_file.cspm.output_path
   source_code_hash = data.archive_file.cspm.output_base64sha256
@@ -47,12 +47,12 @@ resource "aws_lambda_function" "scanner" {
 # ── Remediator Lambda ──────────────────────────────────────────────────────────
 
 resource "aws_lambda_function" "remediator" {
-  function_name    = "cspm-remediator"
-  role             = aws_iam_role.remediator.arn
-  runtime          = "python3.11"
-  handler          = "remediator.remediator.lambda_handler"
-  timeout          = 300
-  memory_size      = 256
+  function_name = "cspm-remediator"
+  role          = aws_iam_role.remediator.arn
+  runtime       = "python3.11"
+  handler       = "remediator.remediator.lambda_handler"
+  timeout       = 300
+  memory_size   = 256
 
   filename         = data.archive_file.cspm.output_path
   source_code_hash = data.archive_file.cspm.output_base64sha256

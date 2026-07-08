@@ -24,8 +24,8 @@ resource "aws_cloudwatch_dashboard" "cspm" {
         width  = 6
         height = 6
         properties = {
-          title  = "Compliance Score (%)"
-          view   = "singleValue"
+          title = "Compliance Score (%)"
+          view  = "singleValue"
           metrics = [[
             "CSPM", "ComplianceScore"
           ]]
@@ -43,15 +43,15 @@ resource "aws_cloudwatch_dashboard" "cspm" {
         width  = 18
         height = 6
         properties = {
-          title  = "Compliance Score Trend (last 7 days)"
-          view   = "timeSeries"
+          title = "Compliance Score Trend (last 7 days)"
+          view  = "timeSeries"
           metrics = [[
             "CSPM", "ComplianceScore",
             { "label" = "Score (%)", "color" = "#2ca02c" }
           ]]
-          period     = 3600
-          stat       = "Maximum"
-          region     = var.aws_region
+          period = 3600
+          stat   = "Maximum"
+          region = var.aws_region
           yAxis = {
             left = { min = 0, max = 100 }
           }
@@ -94,13 +94,13 @@ resource "aws_cloudwatch_dashboard" "cspm" {
         width  = 12
         height = 6
         properties = {
-          title  = "Scanner Invocations (last 24 hrs)"
-          view   = "timeSeries"
+          title = "Scanner Invocations (last 24 hrs)"
+          view  = "timeSeries"
           metrics = [
-            [ "AWS/Lambda", "Invocations", "FunctionName", "cspm-scanner",
+            ["AWS/Lambda", "Invocations", "FunctionName", "cspm-scanner",
               { "label" = "Scanner", "color" = "#1f77b4" }
             ],
-            [ "AWS/Lambda", "Invocations", "FunctionName", "cspm-remediator",
+            ["AWS/Lambda", "Invocations", "FunctionName", "cspm-remediator",
               { "label" = "Remediator", "color" = "#9467bd" }
             ]
           ]
@@ -118,13 +118,13 @@ resource "aws_cloudwatch_dashboard" "cspm" {
         width  = 12
         height = 6
         properties = {
-          title  = "Lambda Errors (last 24 hrs)"
-          view   = "timeSeries"
+          title = "Lambda Errors (last 24 hrs)"
+          view  = "timeSeries"
           metrics = [
-            [ "AWS/Lambda", "Errors", "FunctionName", "cspm-scanner",
+            ["AWS/Lambda", "Errors", "FunctionName", "cspm-scanner",
               { "label" = "Scanner errors", "color" = "#d62728" }
             ],
-            [ "AWS/Lambda", "Errors", "FunctionName", "cspm-remediator",
+            ["AWS/Lambda", "Errors", "FunctionName", "cspm-remediator",
               { "label" = "Remediator errors", "color" = "#ff7f0e" }
             ]
           ]

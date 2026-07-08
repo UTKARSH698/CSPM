@@ -240,7 +240,7 @@ cspm/
 │   ├── dashboard-score.png        # CloudWatch score widget screenshot
 │   └── dashboard-full.png         # Full dashboard screenshot
 ├── .github/workflows/
-│   └── pipeline.yml               # CI: lint + test on PR | CD: terraform deploy on main
+│   └── pipeline.yml               # CI: lint + test | terraform fmt/validate
 └── requirements.txt
 ```
 
@@ -291,16 +291,12 @@ pytest tests/ -v --cov=scanner --cov=remediator --cov-report=term-missing
 
 ### CI/CD via GitHub Actions
 
-Every push to `main` automatically lints, tests, and deploys.
+Every push and PR runs two gates:
 
-Add these 4 secrets under `Settings → Secrets → Actions`:
+- **Lint & Test** — `ruff` + the full `pytest` suite with coverage.
+- **Terraform Validate** — `fmt -check`, `init -backend=false`, and `validate`.
 
-| Secret | Value |
-|---|---|
-| `AWS_ACCESS_KEY_ID` | IAM user access key |
-| `AWS_SECRET_ACCESS_KEY` | IAM user secret key |
-| `AWS_REGION` | `us-east-1` |
-| `ALERT_EMAIL` | Email for security alerts |
+Both run without AWS credentials, so the pipeline stays green on a fork or a fresh clone. Deploys are performed manually (see [Deploy](#deploy)) from a credentialed environment — CI never runs a live `terraform apply` against a real account.
 
 ---
 
