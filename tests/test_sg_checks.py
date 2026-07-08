@@ -3,7 +3,6 @@ Unit tests for scanner/checks/sg_checks.py
 Uses moto to mock EC2/Security Group API calls.
 """
 import boto3
-import pytest
 from moto import mock_aws
 from scanner.checks import sg_checks
 from scanner.models import Status, Severity

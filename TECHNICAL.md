@@ -143,7 +143,7 @@ The remediator checks current resource state before writing in most cases, but n
 
                                                                             ### Current Limits
 
-                                                                            - **Single-region** — scanner runs in the configured region only. Resources in other regions are invisible.
+                                                                            - **Sequential region scanning** — regional services (SG, CloudTrail) are scanned across all enabled regions, but sequentially within one Lambda; scan time grows with region count. Global services (S3, IAM) are scanned once. Cross-*account* aggregation is still out of scope.
                                                                             - **Sequential checks** — each check makes independent boto3 API calls. For accounts with 100+ S3 buckets or 50+ security groups, scan time grows linearly.
                                                                             - **Single Lambda execution context** — all 23 checks run in one Lambda invocation.
 

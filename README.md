@@ -9,7 +9,7 @@
 ![Terraform](https://img.shields.io/badge/Terraform-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
 ![CIS Benchmark](https://img.shields.io/badge/CIS_AWS-v1.5-success?style=for-the-badge)
-![Tests](https://img.shields.io/badge/Tests-64_passing-brightgreen?style=for-the-badge)
+![Tests](https://img.shields.io/badge/Tests-87_passing-brightgreen?style=for-the-badge)
 ![Serverless](https://img.shields.io/badge/Serverless-zero_ops-black?style=for-the-badge&logo=awslambda&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 
@@ -55,9 +55,9 @@ This project frames posture management as a state-transition system where remedi
 > First scan on a brand-new AWS account — detected and alerted within seconds.
 
 ```
-CSPM scan started | region=us-east-1
+CSPM scan started | home_region=us-east-1 regions=['ap-south-1', 'eu-west-1', 'us-east-1', 'us-west-2']
 
-Scan complete | total=25  passed=20  score=80.0%
+Scan complete | total=25  passed=20  failed=5  errored=0  score=80.0%
 
 [CRITICAL] IAM-001 — Root account does not have MFA enabled
 [CRITICAL] CT-001  — No CloudTrail trail exists in this region
@@ -160,8 +160,10 @@ Every remediation action is written as a timestamped JSON audit report to S3.
 After each scan, a compliance score is computed and pushed to CloudWatch as a custom metric:
 
 ```
-Score = (Passed Checks / Total Checks) × 100
+Score = (Passed Checks / (Passed + Failed Checks)) × 100
 ```
+
+Checks that can't be evaluated — e.g. an `AccessDenied` or throttling error from the AWS API — are recorded with status `ERROR` and excluded from the score, so a permissions gap never silently inflates or tanks compliance.
 
 A **CloudWatch Dashboard** is deployed automatically — showing compliance score, 7-day trend, Lambda invocations, and error rates in one view.
 
@@ -280,7 +282,7 @@ cat result.json
 
 ### Running Tests
 
-No AWS credentials needed — all 64 tests use `moto` to mock AWS APIs locally.
+No AWS credentials needed — all 87 tests use `moto` to mock AWS APIs locally.
 
 ```bash
 pip install pytest pytest-cov boto3 "moto[s3,iam,ec2,cloudtrail]"
@@ -313,6 +315,12 @@ Scanner invokes the remediator with `InvocationType=Event` (fire-and-forget). Sc
 **IAM and CloudTrail not auto-fixed**
 Automatically rotating access keys or modifying trail configurations risks breaking production workloads. These are flagged for human review with explicit remediation steps.
 
+**Multi-region scanning**
+Global services (S3, IAM) are scanned once; regional services (Security Groups, CloudTrail) are scanned across every enabled region — so a single-region trail or an exposed SG in any region can't hide. Regions are auto-discovered via `ec2:DescribeRegions`, with an optional `SCAN_REGIONS` override to bound cost.
+
+**Indeterminate checks never count as failures**
+When a check can't be evaluated (e.g. `AccessDenied`, throttling), it's recorded as `ERROR` and excluded from the compliance score — rather than silently reported as a FAIL. A permissions gap can't fake a security problem, and a genuine "not configured" error still fails correctly.
+
 **IPv4 + IPv6 both checked**
 Security group checks cover `0.0.0.0/0` (IPv4) and `::/0` (IPv6). Most similar tools miss IPv6 entirely.
 
@@ -334,7 +342,6 @@ These are honest accounts of what the system does not yet handle — documented 
 | Limitation | Root Cause | What Would Be Needed |
 |---|---|---|
 | **Remediation completeness under concurrent misconfigurations** — applying fix A then fix B in dependency order is locally safe, but I cannot formally prove this strategy is complete under all possible concurrent misconfiguration states | The dependency-ordering heuristic was derived from engineering intuition, not from a formal model of remediation state space | A formal model of the cloud environment as a state-transition system, with proof that the dependency-ordering strategy preserves global security invariants in all reachable states — not just the cases I tested |
-| **Single-region only** — checks run in the configured region; resources in other regions are invisible to the scanner | EventBridge schedule and Lambda execute in one region; no cross-region aggregation | Multi-region aggregator Lambda collecting findings across all enabled regions before scoring |
 | **No drift detection between scans** — if a misconfiguration appears and is manually fixed within the same hourly window, CSPM never sees it | Point-in-time scanning; no continuous state comparison | EventBridge rule on CloudTrail API events for real-time drift detection between scheduled scans |
 | **Remediation is not idempotent across Lambda retries** — if the remediator Lambda retries after a partial fix, it may attempt to re-apply an already-applied action | No idempotency key or state check before each action | Pre-remediation state check: read current resource state before writing, skip if already compliant |
 | **No cross-account support** — scanner operates only within the account it is deployed in | IAM role is scoped to the deployment account | STS AssumeRole pattern with a central aggregator account and spoke roles in each target account |

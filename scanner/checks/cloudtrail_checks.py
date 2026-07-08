@@ -3,6 +3,7 @@ CloudTrail Security Checks
 CIS AWS Benchmark: 3.1 – 3.7
 """
 import boto3
+from scanner.aws_errors import status_from_error
 from scanner.models import Finding, Severity, Status
 
 
@@ -12,8 +13,11 @@ def run(region: str) -> list[Finding]:
 
     try:
         trails = client.describe_trails(includeShadowTrails=False)["trailList"]
-    except Exception:
-        trails = []
+    except Exception as e:
+        # Can't list trails (e.g. AccessDenied) — report CT-001 as indeterminate
+        # rather than falsely claiming no trail exists.
+        findings.append(_trail_exists_error(status_from_error(e), region))
+        return findings
 
     # Account-level check: at least one trail must exist
     findings.append(_check_trail_exists(trails, region))
@@ -38,8 +42,10 @@ def _trail_label(trail: dict) -> str:
 
 def _check_trail_exists(trails: list, region: str) -> Finding:
     """CT-001: At least one CloudTrail trail must exist (CIS 3.1)."""
-    status = Status.PASS if trails else Status.FAIL
+    return _trail_exists_error(Status.PASS if trails else Status.FAIL, region)
 
+
+def _trail_exists_error(status: Status, region: str) -> Finding:
     return Finding(
         check_id="CT-001",
         title="No CloudTrail trail exists in this region",
@@ -141,8 +147,8 @@ def _check_s3_public_access(trail: dict, region: str) -> Finding:
             config.get("RestrictPublicBuckets",   False),
         ])
         status = Status.PASS if all_blocked else Status.FAIL
-    except Exception:
-        status = Status.FAIL
+    except Exception as e:
+        status = status_from_error(e, {"NoSuchPublicAccessBlockConfiguration"})
 
     return Finding(
         check_id="CT-005",
@@ -165,8 +171,8 @@ def _check_trail_logging(client, trail: dict, region: str) -> list[Finding]:
         status_resp = client.get_trail_status(Name=trail["TrailARN"])
         is_logging  = status_resp.get("IsLogging", False)
         status      = Status.PASS if is_logging else Status.FAIL
-    except Exception:
-        status = Status.FAIL
+    except Exception as e:
+        status = status_from_error(e)
 
     return [Finding(
         check_id="CT-006",

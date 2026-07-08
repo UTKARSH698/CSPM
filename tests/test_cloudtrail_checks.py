@@ -3,9 +3,9 @@ Unit tests for scanner/checks/cloudtrail_checks.py
 Uses moto to mock CloudTrail and S3 API calls.
 """
 import boto3
-import pytest
 from moto import mock_aws
 from unittest.mock import patch, MagicMock
+from botocore.exceptions import ClientError
 from scanner.checks import cloudtrail_checks
 from scanner.models import Status, Severity
 
@@ -168,9 +168,24 @@ class TestCheckTrailLogging:
         assert findings[0].status == Status.FAIL
         assert findings[0].severity == Severity.CRITICAL
 
-    def test_fail_on_exception(self):
+    def test_error_on_exception(self):
         ct = MagicMock()
         ct.get_trail_status.side_effect = Exception("Access denied")
         trail = {"Name": "my-trail", "TrailARN": "arn:aws:cloudtrail:us-east-1:123:trail/my-trail"}
         findings = cloudtrail_checks._check_trail_logging(ct, trail, REGION)
-        assert findings[0].status == Status.FAIL
+        assert findings[0].status == Status.ERROR
+
+
+# ── run(): trail listing errors ───────────────────────────────────────────────
+
+class TestRunErrorHandling:
+    def test_ct001_error_when_describe_trails_denied(self):
+        ct = MagicMock()
+        ct.describe_trails.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied"}}, "DescribeTrails",
+        )
+        with patch("scanner.checks.cloudtrail_checks.boto3.client", return_value=ct):
+            findings = cloudtrail_checks.run(REGION)
+        assert len(findings) == 1
+        assert findings[0].check_id == "CT-001"
+        assert findings[0].status == Status.ERROR

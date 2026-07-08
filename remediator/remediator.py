@@ -13,7 +13,7 @@ Environment variables:
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import boto3
 
@@ -100,7 +100,7 @@ def _parse_sg_id(resource: str) -> str:
 def _save_report(results: list, region: str):
     """Write the remediation report as a timestamped JSON file to S3."""
     s3        = boto3.client("s3", region_name=region)
-    timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     key       = f"remediation-reports/{timestamp}.json"
 
     payload = {

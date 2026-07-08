@@ -4,6 +4,7 @@ CIS AWS Benchmark: 1.x
 """
 import boto3
 from datetime import datetime, timezone
+from scanner.aws_errors import status_from_error
 from scanner.models import Finding, Severity, Status
 
 ACCESS_KEY_MAX_AGE_DAYS = 90
@@ -29,8 +30,8 @@ def _check_root_mfa(client, region: str) -> Finding:
         summary = client.get_account_summary()["SummaryMap"]
         mfa_enabled = summary.get("AccountMFAEnabled", 0) == 1
         status = Status.PASS if mfa_enabled else Status.FAIL
-    except Exception:
-        status = Status.FAIL
+    except Exception as e:
+        status = status_from_error(e)
 
     return Finding(
         check_id="IAM-001",
@@ -53,8 +54,8 @@ def _check_root_access_keys(client, region: str) -> Finding:
         summary = client.get_account_summary()["SummaryMap"]
         has_keys = summary.get("AccountAccessKeysPresent", 0) > 0
         status = Status.FAIL if has_keys else Status.PASS
-    except Exception:
-        status = Status.FAIL
+    except Exception as e:
+        status = status_from_error(e)
 
     return Finding(
         check_id="IAM-002",
@@ -83,10 +84,9 @@ def _check_password_policy(client, region: str) -> Finding:
             and policy.get("RequireSymbols", False)
         )
         status = Status.PASS if strong else Status.FAIL
-    except client.exceptions.NoSuchEntityException:
-        status = Status.FAIL
-    except Exception:
-        status = Status.FAIL
+    except Exception as e:
+        # NoSuchEntity means no password policy is set at all → non-compliant.
+        status = status_from_error(e, {"NoSuchEntity"})
 
     return Finding(
         check_id="IAM-003",
@@ -106,29 +106,46 @@ def _check_password_policy(client, region: str) -> Finding:
 def _check_access_key_age(client, region: str) -> list[Finding]:
     """IAM-004: IAM user access keys must be rotated within 90 days (CIS 1.14)"""
     findings = []
-    paginator = client.get_paginator("list_users")
 
-    for page in paginator.paginate():
+    try:
+        pages = list(client.get_paginator("list_users").paginate())
+    except Exception as e:
+        return [_key_age_finding(
+            resource="iam-access-keys",
+            status=status_from_error(e),
+            region=region,
+            title="Could not list IAM users to audit access key age",
+            remediation="Grant the scanner iam:ListUsers/iam:ListAccessKeys and re-run.",
+        )]
+
+    for page in pages:
         for user in page["Users"]:
             username = user["UserName"]
-            keys_resp = client.list_access_keys(UserName=username)
+            try:
+                keys = client.list_access_keys(UserName=username)["AccessKeyMetadata"]
+            except Exception as e:
+                findings.append(_key_age_finding(
+                    resource=username,
+                    status=status_from_error(e),
+                    region=region,
+                    title=f"Could not list access keys for user {username}",
+                    remediation="Grant the scanner iam:ListAccessKeys and re-run.",
+                ))
+                continue
 
-            for key in keys_resp["AccessKeyMetadata"]:
+            for key in keys:
                 if key["Status"] != "Active":
                     continue
 
-                created = key["CreateDate"]
-                age_days = (datetime.now(timezone.utc) - created).days
+                age_days = (datetime.now(timezone.utc) - key["CreateDate"]).days
                 status = Status.FAIL if age_days > ACCESS_KEY_MAX_AGE_DAYS else Status.PASS
+                verb = "older than" if status == Status.FAIL else "rotated within"
 
-                findings.append(Finding(
-                    check_id="IAM-004",
-                    title=f"Access key older than {ACCESS_KEY_MAX_AGE_DAYS} days",
+                findings.append(_key_age_finding(
                     resource=f"{username}/{key['AccessKeyId']}",
-                    service="IAM",
-                    severity=Severity.MEDIUM,
                     status=status,
                     region=region,
+                    title=f"Access key {verb} {ACCESS_KEY_MAX_AGE_DAYS} days",
                     remediation=(
                         f"Rotate access key {key['AccessKeyId']} for user {username}. "
                         "Create a new key, update applications, then deactivate and delete the old key."
@@ -136,3 +153,17 @@ def _check_access_key_age(client, region: str) -> list[Finding]:
                 ))
 
     return findings
+
+
+def _key_age_finding(resource: str, status: Status, region: str,
+                     title: str, remediation: str) -> Finding:
+    return Finding(
+        check_id="IAM-004",
+        title=title,
+        resource=resource,
+        service="IAM",
+        severity=Severity.MEDIUM,
+        status=status,
+        region=region,
+        remediation=remediation,
+    )

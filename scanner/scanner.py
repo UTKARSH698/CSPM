@@ -6,12 +6,14 @@ Environment variables:
   FINDINGS_BUCKET      S3 bucket name to store findings JSON
   SNS_TOPIC_ARN        ARN of SNS topic for critical alerts
   REMEDIATOR_FUNCTION  Name of the Remediator Lambda to invoke
+  SCAN_REGIONS         Optional comma-separated regions for regional checks;
+                       defaults to all enabled regions (auto-discovered)
   AWS_REGION           Injected automatically by Lambda runtime
 """
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import boto3
 
@@ -27,28 +29,37 @@ REMEDIATOR_FUNCTION  = os.environ.get("REMEDIATOR_FUNCTION", "")
 
 
 def lambda_handler(event, context):
-    region = os.environ.get("AWS_REGION", "us-east-1")
-    logger.info("CSPM scan started | region=%s", region)
+    home_region = os.environ.get("AWS_REGION", "us-east-1")
+    regions = _get_regions(home_region)
+    logger.info("CSPM scan started | home_region=%s regions=%s", home_region, regions)
 
     # ── run all check modules ─────────────────────────────────────────────────
     all_findings: list[Finding] = []
-    all_findings += s3_checks.run(region)
-    all_findings += iam_checks.run(region)
-    all_findings += sg_checks.run(region)
-    all_findings += cloudtrail_checks.run(region)
+
+    # Global services (S3, IAM) are account-wide — scan once from the home region.
+    all_findings += s3_checks.run(home_region)
+    all_findings += iam_checks.run(home_region)
+
+    # Regional services (Security Groups, CloudTrail) live per-region — scan each,
+    # so a single-region trail or an exposed SG in any region isn't missed.
+    for region in regions:
+        all_findings += sg_checks.run(region)
+        all_findings += cloudtrail_checks.run(region)
 
     # ── compute compliance score ──────────────────────────────────────────────
-    total  = len(all_findings)
-    passed = sum(1 for f in all_findings if f.status == Status.PASS)
-    score  = round((passed / total) * 100, 1) if total > 0 else 100.0
+    summary = compute_summary(all_findings)
+    score = summary["score"]
 
-    logger.info("Scan complete | total=%d passed=%d score=%.1f%%", total, passed, score)
+    logger.info(
+        "Scan complete | total=%(total)d passed=%(passed)d failed=%(failed)d "
+        "errored=%(errored)d score=%(score).1f%%", summary,
+    )
 
     # ── store findings in S3 ──────────────────────────────────────────────────
-    _save_findings(all_findings, score, region)
+    _save_findings(all_findings, score, home_region)
 
     # ── push compliance score to CloudWatch ──────────────────────────────────
-    _publish_score_metric(score, region)
+    _publish_score_metric(score, home_region)
 
     # ── alert on critical failures ────────────────────────────────────────────
     critical_fails = [
@@ -60,23 +71,57 @@ def lambda_handler(event, context):
 
     # ── invoke remediator asynchronously ─────────────────────────────────────
     if REMEDIATOR_FUNCTION:
-        _invoke_remediator(all_findings, region)
+        _invoke_remediator(all_findings, home_region)
 
-    return {
-        "statusCode": 200,
-        "score": score,
-        "total": total,
-        "passed": passed,
-        "failed": total - passed,
-    }
+    return {"statusCode": 200, **summary}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+def _get_regions(home_region: str) -> list[str]:
+    """Regions to scan for regional services.
+
+    A SCAN_REGIONS env var (comma-separated) pins the list explicitly — useful to
+    bound cost/runtime. Otherwise all enabled regions are discovered dynamically,
+    falling back to the home region if discovery fails (e.g. AccessDenied).
+    """
+    override = os.environ.get("SCAN_REGIONS", "").strip()
+    if override:
+        return [r.strip() for r in override.split(",") if r.strip()]
+
+    try:
+        ec2 = boto3.client("ec2", region_name=home_region)
+        resp = ec2.describe_regions(AllRegions=False)
+        return sorted(r["RegionName"] for r in resp["Regions"])
+    except Exception:
+        logger.warning("Could not enumerate regions; falling back to %s", home_region)
+        return [home_region]
+
+
+def compute_summary(findings: list[Finding]) -> dict:
+    """Tally findings into a compliance summary.
+
+    Checks that couldn't be evaluated (ERROR) are indeterminate — excluded from
+    the score denominator so a permissions gap doesn't silently tank compliance.
+    """
+    passed  = sum(1 for f in findings if f.status == Status.PASS)
+    failed  = sum(1 for f in findings if f.status == Status.FAIL)
+    errored = sum(1 for f in findings if f.status == Status.ERROR)
+    scored  = passed + failed
+    score   = round((passed / scored) * 100, 1) if scored > 0 else 100.0
+
+    return {
+        "score":   score,
+        "total":   len(findings),
+        "passed":  passed,
+        "failed":  failed,
+        "errored": errored,
+    }
+
 def _save_findings(findings: list[Finding], score: float, region: str):
     """Write findings as a timestamped JSON file to S3."""
     s3 = boto3.client("s3", region_name=region)
-    timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     key = f"findings/{timestamp}.json"
 
     payload = {

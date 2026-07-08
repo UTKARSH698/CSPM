@@ -3,7 +3,6 @@ Unit tests for scanner/checks/s3_checks.py
 Uses moto to mock AWS S3 API calls — no real AWS credentials needed.
 """
 import boto3
-import pytest
 from moto import mock_aws
 from unittest.mock import MagicMock
 from botocore.exceptions import ClientError
@@ -74,6 +73,24 @@ class TestCheckPublicAccess:
         assert finding.severity == Severity.CRITICAL
         assert finding.check_id == "S3-001"
 
+    def test_fail_when_no_block_configured_error(self):
+        # Real AWS raises this when no Block Public Access config exists → FAIL
+        s3 = MagicMock()
+        s3.get_public_access_block.side_effect = ClientError(
+            {"Error": {"Code": "NoSuchPublicAccessBlockConfiguration"}},
+            "GetPublicAccessBlock",
+        )
+        finding = s3_checks._check_public_access(s3, "no-block", REGION)
+        assert finding.status == Status.FAIL
+
+    def test_error_on_access_denied(self):
+        s3 = MagicMock()
+        s3.get_public_access_block.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied"}}, "GetPublicAccessBlock",
+        )
+        finding = s3_checks._check_public_access(s3, "denied-bucket", REGION)
+        assert finding.status == Status.ERROR
+
 
 # ── S3-002: Versioning ────────────────────────────────────────────────────────
 
@@ -107,11 +124,11 @@ class TestCheckVersioning:
         finding = s3_checks._check_versioning(s3, "suspended-bucket", REGION)
         assert finding.status == Status.FAIL
 
-    def test_fail_on_exception(self):
+    def test_error_on_exception(self):
         s3 = MagicMock()
         s3.get_bucket_versioning.side_effect = Exception("error")
         finding = s3_checks._check_versioning(s3, "some-bucket", REGION)
-        assert finding.status == Status.FAIL
+        assert finding.status == Status.ERROR
 
     def test_low_severity(self):
         s3 = MagicMock()
@@ -138,11 +155,11 @@ class TestCheckLogging:
         finding = s3_checks._check_logging(s3, "unlogged-bucket", REGION)
         assert finding.status == Status.FAIL
 
-    def test_fail_on_exception(self):
+    def test_error_on_exception(self):
         s3 = MagicMock()
         s3.get_bucket_logging.side_effect = Exception("error")
         finding = s3_checks._check_logging(s3, "some-bucket", REGION)
-        assert finding.status == Status.FAIL
+        assert finding.status == Status.ERROR
 
 
 # ── S3-004: Encryption ────────────────────────────────────────────────────────
@@ -178,6 +195,14 @@ class TestCheckEncryption:
         _make_bucket(s3, "plain-bucket")
         finding = s3_checks._check_encryption(s3, "plain-bucket", REGION)
         assert finding.status == Status.FAIL
+
+    def test_error_on_access_denied(self):
+        s3 = MagicMock()
+        s3.get_bucket_encryption.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied"}}, "GetBucketEncryption",
+        )
+        finding = s3_checks._check_encryption(s3, "denied-bucket", REGION)
+        assert finding.status == Status.ERROR
 
     @mock_aws
     def test_no_findings_when_no_buckets(self):

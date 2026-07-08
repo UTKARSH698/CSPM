@@ -3,6 +3,7 @@ S3 Security Checks
 CIS AWS Benchmark: 2.1.x
 """
 import boto3
+from scanner.aws_errors import status_from_error
 from scanner.models import Finding, Severity, Status
 
 
@@ -38,8 +39,8 @@ def _check_public_access(client, bucket: str, region: str) -> Finding:
             config.get("RestrictPublicBuckets", False),
         ])
         status = Status.PASS if all_blocked else Status.FAIL
-    except Exception:
-        status = Status.FAIL
+    except Exception as e:
+        status = status_from_error(e, {"NoSuchPublicAccessBlockConfiguration"})
 
     return Finding(
         check_id="S3-001",
@@ -62,8 +63,8 @@ def _check_versioning(client, bucket: str, region: str) -> Finding:
         resp = client.get_bucket_versioning(Bucket=bucket)
         enabled = resp.get("Status") == "Enabled"
         status = Status.PASS if enabled else Status.FAIL
-    except Exception:
-        status = Status.FAIL
+    except Exception as e:
+        status = status_from_error(e)
 
     return Finding(
         check_id="S3-002",
@@ -83,8 +84,8 @@ def _check_logging(client, bucket: str, region: str) -> Finding:
         resp = client.get_bucket_logging(Bucket=bucket)
         enabled = "LoggingEnabled" in resp
         status = Status.PASS if enabled else Status.FAIL
-    except Exception:
-        status = Status.FAIL
+    except Exception as e:
+        status = status_from_error(e)
 
     return Finding(
         check_id="S3-003",
@@ -103,13 +104,8 @@ def _check_encryption(client, bucket: str, region: str) -> Finding:
     try:
         client.get_bucket_encryption(Bucket=bucket)
         status = Status.PASS
-    except client.exceptions.ClientError as e:
-        if e.response["Error"]["Code"] == "ServerSideEncryptionConfigurationNotFoundError":
-            status = Status.FAIL
-        else:
-            status = Status.FAIL
-    except Exception:
-        status = Status.FAIL
+    except Exception as e:
+        status = status_from_error(e, {"ServerSideEncryptionConfigurationNotFoundError"})
 
     return Finding(
         check_id="S3-004",

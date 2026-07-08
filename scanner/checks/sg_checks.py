@@ -137,9 +137,8 @@ def _check_default_sg_in_use(sg: dict, region: str) -> Finding:
             remediation="No action needed.",
         )
 
-    has_inbound  = len(sg.get("IpPermissions", [])) > 0
-    has_outbound = len(sg.get("IpPermissionsEgress", [])) > 0
     # Default SG always has one egress rule (allow all outbound) — only fail if inbound exists
+    has_inbound = len(sg.get("IpPermissions", [])) > 0
     status = Status.FAIL if has_inbound else Status.PASS
 
     return Finding(

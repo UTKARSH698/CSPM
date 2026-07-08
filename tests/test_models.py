@@ -1,5 +1,4 @@
 """Unit tests for the Finding model."""
-import pytest
 from scanner.models import Finding, Severity, Status
 
 

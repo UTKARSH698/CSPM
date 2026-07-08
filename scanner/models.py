@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -13,6 +13,7 @@ class Severity(str, Enum):
 class Status(str, Enum):
     FAIL = "FAIL"
     PASS = "PASS"
+    ERROR = "ERROR"   # check could not be evaluated (e.g. AccessDenied, throttling)
 
 
 @dataclass
@@ -25,7 +26,7 @@ class Finding:
     status:      Status
     region:      str
     remediation: str          # human-readable fix description
-    timestamp:   str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp:   str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict:
         return {

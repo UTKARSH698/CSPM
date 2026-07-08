@@ -77,9 +77,12 @@ data "aws_iam_policy_document" "scanner_policy" {
     resources = ["*"]
   }
 
-  # Security Group checks
+  # Security Group checks + region discovery for multi-region scanning
   statement {
-    actions   = ["ec2:DescribeSecurityGroups"]
+    actions = [
+      "ec2:DescribeSecurityGroups",
+      "ec2:DescribeRegions",
+    ]
     resources = ["*"]
   }
 

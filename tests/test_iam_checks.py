@@ -3,10 +3,10 @@ Unit tests for scanner/checks/iam_checks.py
 Uses moto to mock IAM API calls.
 """
 import boto3
-import pytest
 from datetime import datetime, timezone, timedelta
 from moto import mock_aws
 from unittest.mock import patch, MagicMock
+from botocore.exceptions import ClientError
 from scanner.checks import iam_checks
 from scanner.models import Status, Severity
 
@@ -39,11 +39,11 @@ class TestCheckRootMfa:
         assert finding.status == Status.FAIL
 
     @mock_aws
-    def test_fail_on_exception(self):
+    def test_error_on_exception(self):
         iam = boto3.client("iam", region_name=REGION)
         with patch.object(iam, "get_account_summary", side_effect=Exception("Access denied")):
             finding = iam_checks._check_root_mfa(iam, REGION)
-        assert finding.status == Status.FAIL
+        assert finding.status == Status.ERROR
 
     @mock_aws
     def test_critical_severity(self):
@@ -135,6 +135,14 @@ class TestCheckPasswordPolicy:
         finding = iam_checks._check_password_policy(iam, REGION)
         assert finding.status == Status.FAIL
 
+    def test_error_on_access_denied(self):
+        iam = MagicMock()
+        iam.get_account_password_policy.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied"}}, "GetAccountPasswordPolicy",
+        )
+        finding = iam_checks._check_password_policy(iam, REGION)
+        assert finding.status == Status.ERROR
+
 
 # ── IAM-004: Access Key Age ───────────────────────────────────────────────────
 
@@ -188,3 +196,35 @@ class TestCheckAccessKeyAge:
         iam = boto3.client("iam", region_name=REGION)
         findings = iam_checks._check_access_key_age(iam, REGION)
         assert findings == []
+
+    @mock_aws
+    def test_pass_title_matches_status(self):
+        iam = boto3.client("iam", region_name=REGION)
+        iam.create_user(UserName="fresh-user")
+        iam.create_access_key(UserName="fresh-user")
+        findings = iam_checks._check_access_key_age(iam, REGION)
+        assert findings[0].status == Status.PASS
+        assert "rotated within" in findings[0].title  # not the misleading "older than"
+
+    def test_error_when_list_users_denied(self):
+        iam = MagicMock()
+        paginator = MagicMock()
+        paginator.paginate.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied"}}, "ListUsers",
+        )
+        iam.get_paginator.return_value = paginator
+        findings = iam_checks._check_access_key_age(iam, REGION)
+        assert len(findings) == 1
+        assert findings[0].check_id == "IAM-004"
+        assert findings[0].status == Status.ERROR
+
+    @mock_aws
+    def test_error_when_list_access_keys_denied(self):
+        iam = boto3.client("iam", region_name=REGION)
+        iam.create_user(UserName="some-user")
+        with patch.object(
+            iam, "list_access_keys",
+            side_effect=ClientError({"Error": {"Code": "AccessDenied"}}, "ListAccessKeys"),
+        ):
+            findings = iam_checks._check_access_key_age(iam, REGION)
+        assert any(f.status == Status.ERROR for f in findings)
