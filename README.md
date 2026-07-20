@@ -44,9 +44,7 @@ Cloud misconfigurations are the **#1 cause of cloud data breaches** — not soph
 
 An S3 bucket accidentally left public. SSH open to the entire internet. A root account with no MFA. These are the findings that make headlines. CSPM catches them automatically, alerts you the moment they appear, and fixes the safe ones without human intervention.
 
-Building this system surfaced a deeper problem: **security posture is not a point-in-time audit — it is a continuous formal verification problem.** The gap between a written security policy and a deployed system's actual state changes every time infrastructure mutates. Treating it as a snapshot (scan once, fix, done) is structurally wrong.
-
-This project frames posture management as a state-transition system where remediation actions must preserve global security invariants — not just fix individual findings in isolation. That framing exposed an open question I could not answer purely through engineering: see [Known Limitations](#known-limitations).
+Posture also drifts: the gap between your intended security policy and a deployment's actual state changes every time infrastructure mutates, so a one-off audit goes stale quickly. This project runs on a schedule and re-scans continuously rather than treating security as a point-in-time snapshot. A known tradeoff in the auto-remediation design — ordering fixes safely when several misconfigurations are present at once — is documented in [Known Limitations](#known-limitations).
 
 ---
 
@@ -196,7 +194,7 @@ Scan 4 — CloudWatch Logs linked:   80.0%  ████████████
 | IaC | Terraform |
 | CI/CD | GitHub Actions |
 | AWS SDK | boto3 |
-| Testing | pytest (64 tests) · moto (AWS mocks) |
+| Testing | pytest (87 tests) · moto (AWS mocks) |
 | Linting | ruff |
 
 ---
@@ -232,6 +230,7 @@ cspm/
 ├── tests/
 │   ├── conftest.py                # Shared fixtures and mocks
 │   ├── test_models.py             # Finding model unit tests
+│   ├── test_scanner.py            # Scanner handler + compliance-score tests
 │   ├── test_s3_checks.py          # S3 checks (pass + fail cases)
 │   ├── test_iam_checks.py         # IAM checks (pass + fail cases)
 │   ├── test_sg_checks.py          # SG checks (pass + fail cases)
@@ -337,18 +336,16 @@ These are honest accounts of what the system does not yet handle — documented 
 
 | Limitation | Root Cause | What Would Be Needed |
 |---|---|---|
-| **Remediation completeness under concurrent misconfigurations** — applying fix A then fix B in dependency order is locally safe, but I cannot formally prove this strategy is complete under all possible concurrent misconfiguration states | The dependency-ordering heuristic was derived from engineering intuition, not from a formal model of remediation state space | A formal model of the cloud environment as a state-transition system, with proof that the dependency-ordering strategy preserves global security invariants in all reachable states — not just the cases I tested |
+| **Remediation ordering under concurrent misconfigurations** — each auto-fix is safe on its own, but when several fire in one cycle the code applies them independently and does not reason about ordering between them | The remediator dispatches per-finding with no cross-finding coordination; the safe-ordering assumption was validated by the test cases, not proven in general | Add explicit dependency ordering (or a re-scan-and-reconcile loop) so multiple fixes in one cycle can't leave the group in a worse intermediate state, plus tests covering the combinations |
 | **No drift detection between scans** — if a misconfiguration appears and is manually fixed within the same hourly window, CSPM never sees it | Point-in-time scanning; no continuous state comparison | EventBridge rule on CloudTrail API events for real-time drift detection between scheduled scans |
 | **Remediation is not idempotent across Lambda retries** — if the remediator Lambda retries after a partial fix, it may attempt to re-apply an already-applied action | No idempotency key or state check before each action | Pre-remediation state check: read current resource state before writing, skip if already compliant |
 | **No cross-account support** — scanner operates only within the account it is deployed in | IAM role is scoped to the deployment account | STS AssumeRole pattern with a central aggregator account and spoke roles in each target account |
 
-### The Open Formal Question
+### The remediation-ordering tradeoff
 
-The remediation safety problem — whether a sequence of individually correct fixes can produce a collectively insecure intermediate or final state — is the core unsolved question this project exposed.
+The most interesting design question here is remediation safety: when several misconfigurations are present at once, can a batch of individually correct fixes leave the environment in a worse intermediate state before the cycle finishes?
 
-My current strategy (dependency-ordered fixes, single control boundary per cycle) prevents the cases I could construct. But I cannot prove it handles all cases. Specifically: under *k* simultaneous misconfigurations with interdependent remediation actions, does dependency ordering always produce a safe final state? Is there a bound on *k* beyond which the strategy fails?
-
-This is a formal methods question, not an engineering one. It motivates my interest in applying model checking and policy verification techniques to cloud infrastructure state.
+Today the remediator fixes each finding independently and re-scans on the next scheduled run, so any transient inconsistency is caught within an hour rather than reasoned about up front. That is good enough for the fixes currently implemented (S3 Block Public Access, versioning, and revoking open inbound rules — none of which depend on each other), but it would need explicit ordering or a reconcile loop before adding fixes that do interact. That is the concrete next step I would take, and it is the direction I want to keep exploring.
 
 ---
 

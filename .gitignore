@@ -43,3 +43,6 @@ Thumbs.db
 # Environment / secrets
 .env
 *.pem
+
+# Local tooling artifacts
+.claude/
